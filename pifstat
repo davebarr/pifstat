@@ -101,7 +101,8 @@ def main(argv):
     if not options.noheader:
         printheader(options)
 
-    while not options.count and (options.count < count):
+    while not options.count or (options.count >= count):
+        count += 1
         f_netdev.seek(0)
         ts = int(time.time())
         for line in f_netdev:
