@@ -1,0 +1,128 @@
+#!/usr/bin/env python2.7
+# vim: set sw=4 ts=4 expandtab ai:
+
+"""ifstat like tool, in python.  Shows /proc/net/dev stats."""
+
+import sys
+import time
+from argparse import ArgumentParser
+
+
+# /proc/net/dev has 16 fields, 8 for receive and 8 for transmit,
+# defined below.
+
+FIELDS = ["bytes", "pkts", "errs", "drop",
+          "runs", "frame", "comp", "multi",
+          "bytes", "pkts", "errs", "drop",
+          "runs", "colls", "carr", "comp"]
+
+
+def printheader(options):
+    """Prints a header"""
+
+    if options.asbits:
+        units = "b/sec"
+    else:
+        units = "B/sec"
+
+    unitprefix = " "
+    if options.mega:
+        unitprefix = "M"
+    if options.kilo:
+        unitprefix = "K"
+
+    print "in".center(39), "out".center(39)
+    print "dev  ", unitprefix + units, " ",
+    for field in FIELDS[1:6]:
+        print format(field, "6s"),
+    print "| ", unitprefix + units, " ",
+    for field in FIELDS[9:14]:
+        print format(field, "6s"),
+    print
+
+def printstats(options, dev, stats, oldstats):
+    """Print a line of statistics"""
+    print format(dev, "5s"),
+
+    if options.asbits:
+        multi = 8.0 / options.interval
+    else:
+        multi = 1.0 / options.interval
+    if options.mega:
+        multi = multi / (1024 * 1024)
+    if options.kilo:
+        multi = multi / (1024)
+
+    print "%7s" % (format(multi * (int(stats[0]) - int(oldstats[0])), ".0f")), " ",
+    for index in range(1, 6):
+        print "%4s" % (format(multi * (int(stats[index]) - int(oldstats[index])), ".0f")), " ",
+    print "| ",
+    print "%7s" % (format(multi * (int(stats[8]) - int(oldstats[8])), ".0f")), " ",
+    for index in range(9, 14):
+        print "%4s" % (format(int(stats[index]) - int(oldstats[index]), ".0f")), " ",
+    print
+    
+
+def main(argv):
+    """
+    pifstat main loop
+    """
+
+    parser = ArgumentParser(prog="pifstat", usage="%(prog)s [options] [interval] [count]",
+                            description="Print /proc/net/dev interface statistics")
+    parser.add_argument("-l", dest="loopback", action="store_true", default=False,
+                      help="Enables monitoring of loopback interfaces")
+    parser.add_argument("-i", dest="interfaces",
+                      help="Comma separated list of interfaces to monitor")
+    parser.add_argument("-n", dest="noheader", action="store_true", default=False,
+                      help="Turns off displaying the header")
+    parser.add_argument("-T", dest="showtotal", action="store_true", default=False,
+                      help="Reports total bandwith for all monitored interfaces")
+    parser.add_argument("-b", dest="asbits", action="store_true", default=False,
+                      help="Report bits/sec instead of bytes/sec")
+    parser.add_argument("-z", dest="hidezero", action="store_true", default=False,
+                      help="Hides interfaces with null counters")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("-k", dest="kilo", action="store_true", default=False,
+                      help="Print in KB or Kb/sec (compatible with ifstat)")
+    group.add_argument("-m", dest="mega", action="store_true", default=False,
+                      help="Print in MB or Mb/sec")
+    parser.add_argument("interval", default=1, nargs='?', type=float, help="Interval")
+    parser.add_argument("count", nargs='?', type=int, help="count")
+    options = parser.parse_args()
+
+    f_netdev = open("/proc/net/dev", "r")
+
+    count = 0
+    oldstats = {}
+    if options.interfaces:
+        iflist = options.interfaces.split(",")
+
+    if not options.noheader:
+        printheader(options)
+
+    while not options.count and (options.count < count):
+        f_netdev.seek(0)
+        ts = int(time.time())
+        for line in f_netdev:
+            if ":" not in line: # header
+                continue
+            (dev, s) = line.split(":")
+            stats = s.split()
+            dev = dev.strip()
+            if not options.loopback and dev == "lo":
+                continue
+            if options.hidezero and set(stats) == set(['0']):
+                continue
+            if options.interfaces and dev not in iflist:
+                continue
+            if dev in oldstats:
+                printstats(options, dev, stats, oldstats[dev])
+            oldstats[dev] = stats
+        try:
+            time.sleep(options.interval)
+        except KeyboardInterrupt:
+            return(0)
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
